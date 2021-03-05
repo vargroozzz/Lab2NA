@@ -6,73 +6,49 @@ where
 import qualified Data.Matrix                   as M
 
 import qualified Data.Vector                   as V
-import           Prelude
+import           Linear.Epsilon
+import           Data.Either                    ( fromRight )
 
 
 seidelMethod
-  :: (Num d, Ord d, Fractional d) => M.Matrix d -> V.Vector d -> V.Vector d
-seidelMethod a b =
+  :: (Num d, Ord d, Fractional d, Epsilon d)
+  => M.Matrix d
+  -> V.Vector d
+  -> V.Vector d
+  -> V.Vector d
+seidelMethod a b x_initial =
   let
-    Just (u, l, p, d) = M.luDecomp a
-    pxb               = V.fromList . M.toList $ p * M.colVector b
-    helperY 0 = V.singleton (pxb V.! 0)
-    helperY n =
-      helperY (n - 1)
-        `V.snoc` (pxb V.! n - sum
-                   ( (M.rowVector . V.slice 0 n $ M.getRow (n + 1) l)
-                   * M.colVector (helperY (n - 1))
-                   )
-                 )
-    y     = helperY (length pxb - 1)
-    uDiag = M.getDiag u
-    helperX 0 = V.singleton (V.last y / V.last uDiag)
-    helperX n =
-      (   (y V.! (V.length y - (n + 1)) - sum
-            ((M.rowVector . V.slice (length y - n) n $ M.getRow (length y - n) u)
-            * M.colVector (helperX (n - 1))
-            )
-          )
-        /   uDiag
-        V.! (V.length y - (n + 1))
-        )
-        `V.cons` helperX (n - 1)
-    x = helperX (length pxb - 1)
+    l = M.matrix (M.nrows a)
+                 (M.ncols a)
+                 (\(i, j) -> if i >= j then a M.! (i, j) else 0)
+    u = M.matrix (M.nrows a)
+                 (M.ncols a)
+                 (\(i, j) -> if i < j then a M.! (i, j) else 0)
+    rev_l = fromRight (M.zero (M.nrows a) (M.ncols a)) (M.inverse l)
+    x_new =
+      M.getMatrixAsVector $ rev_l * (M.colVector b - u * M.colVector x_initial)
   in
-    x
+    if all (nearZero . abs) (V.zipWith (-) x_initial x_new)
+      then x_new
+      else seidelMethod a b x_new
 
+debugSeidelMethod
+  :: (Num d, Ord d, Fractional d, Epsilon d, Show d)
+  => M.Matrix d
+  -> V.Vector d
+  -> V.Vector d
+  -> IO ()
+debugSeidelMethod a b x_initial = do
+  let l = M.matrix (M.nrows a)
+                   (M.ncols a)
+                   (\(i, j) -> if i >= j then a M.! (i, j) else 0)
+  let u = M.matrix (M.nrows a)
+                   (M.ncols a)
+                   (\(i, j) -> if i < j then a M.! (i, j) else 0)
+  let rev_l = fromRight (M.zero (M.nrows a) (M.ncols a)) (M.inverse l)
+  let x_new =
+        M.getMatrixAsVector
+          $ rev_l
+          * (M.colVector b - u * M.colVector x_initial)
 
--- debugSeidelMethod
---   :: (Num d, Ord d, Fractional d, Show d) => M.Matrix d -> V.Vector d -> IO ()
--- debugSeidelMethod a b =
---   let
---     Just (u, l, p, _) = M.luDecomp a
---     pxb               = V.fromList $ M.toList (p * M.colVector b)
---     helperY 0 = V.singleton (pxb V.! 0)
---     helperY n =
---       helperY (n - 1)
---         `V.snoc` (pxb V.! n - sum
---                    ( (M.rowVector . V.slice 0 n $ M.getRow (n + 1) l)
---                    * M.colVector (helperY (n - 1))
---                    )
---                  )
---     y     = helperY (length pxb - 1)
---     uDiag = M.getDiag u
---     helperX 0 = V.singleton (V.last y / V.last uDiag)
---     helperX n =
---       (   (y V.! (V.length y - (n + 1)) - sum
---             ((M.rowVector . V.slice (length y - n) n $ M.getRow (length y - n) u)
---             * M.colVector (helperX (n - 1))
---             )
---           )
---         /   uDiag
---         V.! (V.length y - (n + 1))
---         )
---         `V.cons` helperX (n - 1)
---     x = helperX (length pxb - 1)
---   in
---     do
---       putStrLn
---         . ("M.colVector (helperX (n - 1)): \n" <>)
---         . M.prettyMatrix
---         $ M.colVector (helperX (1 - 1))
---       putStrLn . ("1: \n" <>) . M.prettyMatrix . M.colVector $ x
+  putStrLn . M.prettyMatrix . M.colVector $ x_new

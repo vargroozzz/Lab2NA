@@ -3,4 +3,7 @@ module Main where
 import           Lib
 
 main :: IO ()
-main = printGaussMethod
+main = do
+--   printGaussMethod
+  printJacobyMethod
+--   printSeidelMethod

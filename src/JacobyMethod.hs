@@ -1,78 +1,73 @@
 module JacobyMethod
   ( jacobyMethod
+  , debugJacobyMethod
   )
 where
 
 import qualified Data.Matrix                   as M
 
 import qualified Data.Vector                   as V
-import           Prelude
-
+import           Linear.Epsilon
+import           Data.Either
 
 jacobyMethod
-  :: (Num d, Ord d, Fractional d) => M.Matrix d -> V.Vector d -> V.Vector d
-jacobyMethod a b =
-  let
-    Just (u, l, p, d) = M.luDecomp a
-    pxb               = V.fromList . M.toList $ p * M.colVector b
-    helperY 0 = V.singleton (pxb V.! 0)
-    helperY n =
-      helperY (n - 1)
-        `V.snoc` (pxb V.! n - sum
-                   ( (M.rowVector . V.slice 0 n $ M.getRow (n + 1) l)
-                   * M.colVector (helperY (n - 1))
-                   )
-                 )
-    y     = helperY (length pxb - 1)
-    uDiag = M.getDiag u
-    helperX 0 = V.singleton (V.last y / V.last uDiag)
-    helperX n =
-      (   (y V.! (V.length y - (n + 1)) - sum
-            ((M.rowVector . V.slice (length y - n) n $ M.getRow (length y - n) u)
-            * M.colVector (helperX (n - 1))
+  :: (Num d, Ord d, Fractional d, Show d, Epsilon d)
+  => M.Matrix d
+  -> V.Vector d
+  -> V.Vector d
+  -> V.Vector d
+jacobyMethod a b x_initial =
+  let l_plus_u = M.matrix (M.nrows a)
+                          (M.ncols a)
+                          (\(i, j) -> if i /= j then a M.! (i, j) else 0)
+      rev_d = fromRight (M.zero (M.nrows a) (M.ncols a))
+                        (M.inverse . M.diagonal 0 . M.getDiag $ a)
+      t     = negate <$> rev_d * l_plus_u
+      c     = rev_d * M.colVector b
+      x_new = M.getMatrixAsVector $ t * M.colVector x_initial + c
+  in  if all (nearZero . abs) (V.zipWith (-) x_initial x_new)
+        then x_new
+        else jacobyMethod a b x_new
+
+debugJacobyMethod
+  :: (Num d, Ord d, Fractional d, Show d, Epsilon d)
+  => M.Matrix d
+  -> V.Vector d
+  -> V.Vector d
+  -> IO ()
+debugJacobyMethod a b x_initial = do
+  let l = M.matrix (M.nrows a)
+                   (M.ncols a)
+                   (\(i, j) -> if i > j then a M.! (i, j) else 0)
+  let u = M.matrix (M.nrows a)
+                   (M.ncols a)
+                   (\(i, j) -> if i < j then a M.! (i, j) else 0)
+  let l_plus_u = M.matrix (M.nrows a)
+                          (M.ncols a)
+                          (\(i, j) -> if i /= j then a M.! (i, j) else 0)
+  let rev_d = fromRight (M.zero (M.nrows a) (M.ncols a))
+                        (M.inverse . M.diagonal 0 . M.getDiag $ a)
+  let t     = negate <$> rev_d * l_plus_u
+  let c     = rev_d * M.colVector b
+  let x_new = M.getMatrixAsVector $ t * M.colVector x_initial + c
+
+  let sums1 = V.generate
+        (length b)
+        (\i ->
+          ( (M.rowVector . V.slice 0 (i + 1) . M.getRow (i + 1) $ a)
+            * (M.colVector . V.slice 0 (i + 1) $ x_initial)
             )
-          )
-        /   uDiag
-        V.! (V.length y - (n + 1))
+            M.! (1, 1)
         )
-        `V.cons` helperX (n - 1)
-    x = helperX (length pxb - 1)
-  in
-    x
 
-
--- debugGaussMethod
---   :: (Num d, Ord d, Fractional d, Show d) => M.Matrix d -> V.Vector d -> IO ()
--- debugGaussMethod a b =
---   let
---     Just (u, l, p, _) = M.luDecomp a
---     pxb               = V.fromList $ M.toList (p * M.colVector b)
---     helperY 0 = V.singleton (pxb V.! 0)
---     helperY n =
---       helperY (n - 1)
---         `V.snoc` (pxb V.! n - sum
---                    ( (M.rowVector . V.slice 0 n $ M.getRow (n + 1) l)
---                    * M.colVector (helperY (n - 1))
---                    )
---                  )
---     y     = helperY (length pxb - 1)
---     uDiag = M.getDiag u
---     helperX 0 = V.singleton (V.last y / V.last uDiag)
---     helperX n =
---       (   (y V.! (V.length y - (n + 1)) - sum
---             ((M.rowVector . V.slice (length y - n) n $ M.getRow (length y - n) u)
---             * M.colVector (helperX (n - 1))
---             )
---           )
---         /   uDiag
---         V.! (V.length y - (n + 1))
---         )
---         `V.cons` helperX (n - 1)
---     x = helperX (length pxb - 1)
---   in
---     do
---       putStrLn
---         . ("M.colVector (helperX (n - 1)): \n" <>)
---         . M.prettyMatrix
---         $ M.colVector (helperX (1 - 1))
---       putStrLn . ("1: \n" <>) . M.prettyMatrix . M.colVector $ x
+  let sums2 = V.generate
+        (length b)
+        (\i ->
+          ( (M.rowVector . V.slice i (length b - i) . M.getRow (i + 1) $ a)
+            * (M.colVector . V.slice i (length b - i) $ x_initial)
+            )
+            M.! (1, 1)
+        )
+  if all (nearZero . abs) (V.zipWith (-) x_initial x_new)
+    then print x_new
+    else debugJacobyMethod a b x_new
